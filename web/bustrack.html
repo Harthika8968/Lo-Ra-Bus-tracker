@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>College Bus Live - Pro</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    
+    <style>
+        /* --- APPLE-STYLE DESIGN --- */
+        :root {
+            --glass-bg: rgba(255, 255, 255, 0.75);
+            --glass-border: rgba(255, 255, 255, 0.4);
+            --blur: 20px;
+            --shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.15);
+            --text-main: #1d1d1f;
+            --text-sub: #86868b;
+            --accent: #007aff; 
+            --success: #34c759;
+            --warning: #ffcc00;
+        }
+
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; overflow: hidden; background: #000; }
+        #map { height: 100%; width: 100%; z-index: 0; }
+
+        /* --- UI PANELS --- */
+        .glass-panel {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 380px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--blur)); -webkit-backdrop-filter: blur(var(--blur));
+            border: 1px solid var(--glass-border); border-radius: 24px;
+            box-shadow: var(--shadow); padding: 20px; z-index: 1000;
+            transition: all 0.4s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+        
+        .glass-panel.minimized {
+            width: 50px; height: 50px; padding: 0; border-radius: 50%; bottom: 30px;
+            background: rgba(255, 255, 255, 0.95); cursor: pointer;
+        }
+
+        .panel-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }
+        .title { font-size: 1.2rem; font-weight: 700; color: var(--text-main); letter-spacing: -0.5px; }
+        .status-badge { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; padding: 4px 10px; border-radius: 12px; margin-left: 8px; background: rgba(0, 122, 255, 0.15); color: var(--accent); }
+        .toggle-btn { background: none; border: none; cursor: pointer; color: var(--text-sub); }
+        
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .stat-item { background: rgba(255,255,255,0.4); padding: 10px; border-radius: 12px; text-align: center; }
+        .stat-label { font-size: 0.65rem; color: var(--text-sub); text-transform: uppercase; margin-bottom: 2px; }
+        .stat-val { font-size: 1rem; font-weight: 700; color: var(--text-main); }
+        .rssi-val { font-size: 0.9rem; font-weight: 600; color: var(--text-sub); }
+
+        /* --- LEGEND --- */
+        .map-legend {
+            margin-top: 15px; padding-top: 15px;
+            border-top: 1px solid var(--glass-border);
+            display: flex; justify-content: space-around;
+            font-size: 0.75rem; color: var(--text-main); font-weight: 600;
+        }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+
+        .minimized-icon { display: none; width: 100%; height: 100%; justify-content: center; align-items: center; color: var(--accent); }
+        .glass-panel.minimized .minimized-icon { display: flex; }
+        .glass-panel.minimized .panel-header, .glass-panel.minimized .stats-grid, .glass-panel.minimized .map-legend { display: none; }
+
+        .btn-group { position: absolute; top: 20px; right: 20px; display: flex; flex-direction: column; gap: 10px; z-index: 1000; }
+        .glass-btn { width: 44px; height: 44px; background: var(--glass-bg); backdrop-filter: blur(var(--blur)); border-radius: 12px; border: 1px solid var(--glass-border); box-shadow: var(--shadow); display: flex; justify-content: center; align-items: center; cursor: pointer; color: var(--accent); transition: transform 0.2s; }
+        .glass-btn:active { transform: scale(0.95); }
+
+        .notify-active { color: var(--success); background: rgba(255,255,255,0.9); border-color: var(--success); }
+        
+        /* --- THE MAGIC: SMOOTH GLIDING & ROTATION --- */
+        .smooth-glide { transition: transform 2s linear !important; }
+        .bus-wrapper { width: 36px; height: 36px; display: flex; justify-content: center; align-items: center; background: white; border-radius: 50%; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border: 3px solid var(--accent); transition: transform 1s ease-out; }
+        .user-dot { width: 16px; height: 16px; background: var(--success); border: 3px solid white; border-radius: 50%; box-shadow: 0 2px 8px rgba(0,0,0,0.4); }
+        
+        .user-tooltip { background: var(--glass-bg); backdrop-filter: blur(10px); border: 1px solid var(--glass-border); border-radius: 8px; font-weight: 700; color: var(--text-main); font-size: 0.75rem; box-shadow: var(--shadow); }
+        .leaflet-tooltip-top:before { display: none; } 
+    </style>
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+</head>
+<body>
+
+    <div id="map"></div>
+
+    <div class="btn-group">
+        <div class="glass-btn" id="notifyBtn" onclick="toggleNotification()" title="Get notified when bus is near">
+            <svg id="bellIcon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+        </div>
+        <div class="glass-btn" onclick="centerUser()" title="Find Me">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2v2m0 16v2M2 12h2m16 0h2m-5 0a5 5 0 11-10 0 5 5 0 0110 0z"/>
+            </svg>
+        </div>
+        <div class="glass-btn" onclick="centerMap()" title="Find Bus">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="3 11 22 2 13 21 11 13 3 11"></polygon></svg>
+        </div>
+        <div class="glass-btn" onclick="toggleMapStyle()" title="Change Map Style">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"></polygon>
+                <polyline points="2 12 12 17 22 12"></polyline>
+                <polyline points="2 17 12 22 22 17"></polyline>
+            </svg>
+        </div>
+    </div>
+
+    <div class="glass-panel" id="infoPanel">
+        <div class="minimized-icon" onclick="togglePanel()">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"></polyline></svg>
+        </div>
+        <div class="panel-header">
+            <div style="display:flex; align-items:center;">
+                <span class="title">College Bus</span>
+                <span class="status-badge" id="moveStatus">Connecting...</span>
+            </div>
+            <button class="toggle-btn" onclick="togglePanel()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+            </button>
+        </div>
+        <div class="stats-grid">
+            <div class="stat-item"><div class="stat-label">Dist. to You</div><div class="stat-val" id="distToUser">--</div></div>
+            <div class="stat-item"><div class="stat-label">Speed</div><div class="stat-val"><span id="speedVal">0</span> <span style="font-size: 0.7rem;">km/h</span></div></div>
+            <div class="stat-item"><div class="stat-label">Signal</div><div class="rssi-val"><span id="rssi">--</span> dBm</div></div>
+            <div class="stat-item"><div class="stat-label">Alert Status</div><div class="stat-val" style="font-size: 0.8rem;" id="notifyStatus">Off</div></div>
+        </div>
+        
+        <div class="map-legend">
+            <div class="legend-item">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="#007aff" style="transform: rotate(-45deg);"><path d="M3 11l19-9-9 19-2-8-8-2z"></path></svg>
+                Bus
+            </div>
+            <div class="legend-item">
+                <div style="width: 12px; height: 12px; border-bottom: 4px solid var(--accent);"></div>
+                Route
+            </div>
+            <div class="legend-item">
+                <div style="width: 12px; height: 12px; background: var(--success); border: 2px solid white; border-radius: 50%;"></div>
+                You
+            </div>
+        </div>
+    </div>
+
+    <script>
+    const dbUrl = "https://bustracker-ffb4d-default-rtdb.asia-southeast1.firebasedatabase.app/bus.json"; 
+    const NOTIFY_DISTANCE_KM = 2.5; 
+    const MIN_MARKER_MOVE = 5; 
+
+    // --- MAP SETUP ---
+    var googleStreets = L.tileLayer('http://{s}.google.com/vt?lyrs=m&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'] });
+    var googleSatellite = L.tileLayer('http://{s}.google.com/vt?lyrs=y&x={x}&y={y}&z={z}', { maxZoom: 20, subdomains: ['mt0', 'mt1', 'mt2', 'mt3'] });
+    
+    var mapLayers = [googleSatellite, googleStreets];
+    var currentLayerIndex = 0;
+    
+    var map = L.map('map', { zoomControl: false, layers: [googleSatellite] }).setView([15.46, 78.48], 16);
+
+    function toggleMapStyle() {
+        map.removeLayer(mapLayers[currentLayerIndex]);
+        currentLayerIndex = (currentLayerIndex + 1) % mapLayers.length;
+        map.addLayer(mapLayers[currentLayerIndex]);
+    }
+
+    // --- ICON & PATH SETUP ---
+    const arrowSVG = `<svg width="20" height="20" viewBox="0 0 24 24" fill="#007aff" stroke="#007aff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(-45deg); margin-top: -2px; margin-left: -2px;"><path d="M3 11l19-9-9 19-2-8-8-2z"></path></svg>`;
+    var busIcon = L.divIcon({ className: 'custom-div-icon smooth-glide', html: `<div class='bus-wrapper' id='busWrapper'>${arrowSVG}</div>`, iconSize: [36, 36], iconAnchor: [18, 18] });
+    var busMarker = L.marker([15.46, 78.48], {icon: busIcon, zIndexOffset: 1000}).addTo(map);
+    
+    var historySegments = [];
+    // The blue history line showing where the bus traveled (snapped to road)
+    var pathLine = L.polyline([], { color: '#007aff', weight: 5, opacity: 0.6, lineJoin: 'round' }).addTo(map);
+
+    map.on('zoomstart', function() { if (busMarker._icon) busMarker._icon.classList.remove('smooth-glide'); });
+    map.on('zoomend', function() { if (busMarker._icon) busMarker._icon.classList.add('smooth-glide'); });
+
+    var userMarker = null, userLat = null, userLon = null;
+    var isNotifyOn = false, hasNotified = false; 
+    let lastMarkerLat = null, lastMarkerLon = null, isFirstLoad = true;
+    let currentBearing = 0;
+
+    // --- USER LOCATION ---
+    if (navigator.geolocation) {
+        navigator.geolocation.watchPosition((position) => {
+            userLat = position.coords.latitude; userLon = position.coords.longitude;
+            if (!userMarker) {
+                userMarker = L.marker([userLat, userLon], {icon: L.divIcon({ className: 'u-dot', html: "<div class='user-dot'></div>", iconSize: [16, 16] })}).addTo(map);
+                userMarker.bindTooltip("You", { permanent: true, direction: "top", offset: [0, -5], className: "user-tooltip" }).openTooltip();
+            } else { userMarker.setLatLng([userLat, userLon]); }
+        }, (err) => {}, { enableHighAccuracy: true });
+    }
+
+    // --- UI FUNCTIONS ---
+    function togglePanel() { document.getElementById('infoPanel').classList.toggle('minimized'); }
+    function centerMap() { if (lastMarkerLat) map.setView([lastMarkerLat, lastMarkerLon], 17); }
+    function centerUser() { if (userLat && userLon) { map.setView([userLat, userLon], 17); } else { alert("Waiting for GPS signal..."); } }
+
+    function toggleNotification() {
+        if (!("Notification" in window)) return alert("Not supported.");
+        if (!isNotifyOn) { Notification.requestPermission().then(perm => { if (perm === "granted") { isNotifyOn = true; hasNotified = false; updateNotifyUI(); } });
+        } else { isNotifyOn = false; updateNotifyUI(); }
+    }
+
+    function updateNotifyUI() {
+        const btn = document.getElementById('notifyBtn'); const statusTxt = document.getElementById('notifyStatus');
+        if (isNotifyOn) { btn.classList.add('notify-active'); statusTxt.innerText = "ON (< 2.5km)"; statusTxt.style.color = "#34c759";
+        } else { btn.classList.remove('notify-active'); statusTxt.innerText = "OFF"; statusTxt.style.color = "#86868b"; }
+    }
+
+    function calculateBearing(startLat, startLng, destLat, destLng) {
+        startLat = startLat * Math.PI / 180; startLng = startLng * Math.PI / 180;
+        destLat = destLat * Math.PI / 180; destLng = destLng * Math.PI / 180;
+        let y = Math.sin(destLng - startLng) * Math.cos(destLat);
+        let x = Math.cos(startLat) * Math.sin(destLat) - Math.sin(startLat) * Math.cos(destLat) * Math.cos(destLng - startLng);
+        let brng = Math.atan2(y, x); return (brng * 180 / Math.PI + 360) % 360;
+    }
+
+    // --- OFF-ROAD DETECTION: History Trail Only ---
+    async function updateHistoryTrail(startLat, startLon, endLat, endLon) {
+        const osrmUrl = `https://router.project-osrm.org/route/v1/driving/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson`;
+        try {
+            let resp = await fetch(osrmUrl);
+            let json = await resp.json();
+            
+            if (json.routes && json.routes.length > 0) {
+                // Check if the coordinates are far off-road
+                let startOffRoad = json.waypoints[0].distance > 30;
+                let endOffRoad = json.waypoints[1].distance > 30;
+
+                // Only draw the blue trail if the bus is driving on a real road
+                if (!startOffRoad && !endOffRoad) {
+                    let routeCoords = json.routes[0].geometry.coordinates.map(coord => [coord[1], coord[0]]);
+                    historySegments.push(routeCoords);
+                    if (historySegments.length > 500) historySegments.shift(); 
+                    pathLine.setLatLngs(historySegments);
+                }
+                // If it IS off-road, we do nothing. The bus marker still moved, but leaves no blue trail behind!
+            }
+        } catch (e) { console.error(e); }
+    }
+
+    // --- CORE LOGIC ---
+    async function fetchLocation() {
+        try {
+            const response = await fetch(dbUrl + "?nocache=" + new Date().getTime());
+            const data = await response.json();
+            if (!data || !data.lat) return;
+
+            let lat = parseFloat(data.lat); let lon = parseFloat(data.lon);
+            if (isNaN(lat) || isNaN(lon) || lat < 10 || lat > 20 || lon < 70 || lon > 85) return; 
+
+            let newPos = [lat, lon];
+            let distM = 0;
+            document.getElementById('rssi').innerText = data.rssi || "--";
+
+            // Update distance to user text and handle notifications
+            if (userLat && userLon) {
+                let uDist = map.distance(newPos, [userLat, userLon]);
+                let uDistKm = uDist / 1000;
+                
+                document.getElementById('distToUser').innerText = uDist < 1000 ? Math.round(uDist) + " m" : uDistKm.toFixed(2) + " km";
+                
+                if (isNotifyOn && uDistKm <= NOTIFY_DISTANCE_KM && !hasNotified) {
+                    new Notification("Bus Arriving!", { body: `The bus is ${uDistKm.toFixed(1)}km away.` });
+                    hasNotified = true;
+                }
+            }
+
+            if (lastMarkerLat !== null) {
+                distM = map.distance(newPos, [lastMarkerLat, lastMarkerLon]);
+                let speedKmph = (distM / 2) * 3.6;
+                
+                if (distM > MIN_MARKER_MOVE) {
+                    let newBearing = calculateBearing(lastMarkerLat, lastMarkerLon, lat, lon);
+                    currentBearing = newBearing;
+                    
+                    let wrapper = document.getElementById('busWrapper');
+                    if(wrapper) wrapper.style.transform = `rotate(${currentBearing}deg)`;
+
+                    document.getElementById('speedVal').innerText = Math.round(speedKmph);
+                    document.getElementById('moveStatus').innerText = "LIVE";
+                    document.getElementById('moveStatus').style.color = "#007aff";
+                    
+                    // Move the actual bus icon unconditionally (so it goes off-road if needed)
+                    busMarker.setLatLng(newPos);
+                    
+                    // Attempt to draw the blue road path (will only draw if on-road)
+                    updateHistoryTrail(lastMarkerLat, lastMarkerLon, lat, lon);
+                    
+                    lastMarkerLat = lat; lastMarkerLon = lon;
+                } else {
+                    document.getElementById('speedVal').innerText = "0";
+                    document.getElementById('moveStatus').innerText = "IDLE";
+                    document.getElementById('moveStatus').style.color = "#86868b";
+                }
+            } else {
+                busMarker.setLatLng(newPos);
+                lastMarkerLat = lat; lastMarkerLon = lon;
+                if(isFirstLoad) { map.setView(newPos, 17); isFirstLoad = false; }
+            }
+        } catch (e) { console.error("Data error:", e); }
+    }
+
+    setInterval(fetchLocation, 2000);
+    </script>
+</body>
+</html>
